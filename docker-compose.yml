@@ -11,9 +11,10 @@ services:
       - mongo-data:/data/db
 
   app:
+    platform: linux/amd64
     build:
       context: .
-      platform: linux/amd64
+      dockerfile: Dockerfile
     container_name: cc-exercise-2
     restart: unless-stopped
     ports:
