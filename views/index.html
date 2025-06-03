@@ -75,12 +75,12 @@
   </tr>
   {{ range . }}
   <tr id="row-{{ .ID }}">
-    <th> {{ .BookName }} </th>
-    <th> {{ .BookAuthor }} </th>
-    <th> {{ .BookISBN }} </th>
-    <th> {{ .BookPages }} </th>
-    <th> {{ .BookYear }} </th>
-    <th> {{ .ID }}</th>
+    <th> {{ .title }} </th>
+    <th> {{ .author }} </th>
+    <th> {{ .isbn }} </th>
+    <th> {{ .pages }} </th>
+    <th> {{ .year }} </th>
+    <th> {{ .id }}</th>
   </tr>
   {{ end }}
 </table>
@@ -130,12 +130,12 @@
 {{ define "create" }}
 <h2>Add New Book</h2>
 <form action="/api/books" method="post">
-  <input name="ID" placeholder="ID" required><br>
-  <input name="BookName" placeholder="Name" required><br>
-  <input name="BookAuthor" placeholder="Author"><br>
-  <input name="BookISBN" placeholder="ISBN" required><br>
-  <input name="BookPages" type="number" placeholder="Pages"><br>
-  <input name="BookYear" type="number" placeholder="Year"><br>
+  <input name="id" placeholder="ID" required><br>
+  <input name="title" placeholder="Name" required><br>
+  <input name="author" placeholder="Author"><br>
+  <input name="isbn" placeholder="ISBN"><br>
+  <input name="pages" type="number" placeholder="Pages"><br>
+  <input name="year" type="number" placeholder="Year"><br>
   <button type="submit">Create Book</button>
 </form>
 {{ end }}

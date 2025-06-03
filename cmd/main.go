@@ -26,12 +26,12 @@ import (
 // frontend or the database
 type BookStore struct {
 	MongoID    primitive.ObjectID `bson:"_id,omitempty"`
-	ID         string             `json:"ID" bson:"ID"`
-	BookName   string
-	BookAuthor string
-	BookISBN   string
-	BookPages  int
-	BookYear   int
+	ID         string             `json:"id" form:"id" bson:"ID"`
+	BookName   string             `json:"title" form:"title" bson:"bookname"`
+	BookAuthor string             `json:"author,omitempty" form:"author" bson:"bookauthor,omitempty"`
+	BookISBN   string             `json:"isbn,omitempty" form:"isbn" bson:"bookisbn,omitempty"`
+	BookPages  int                `json:"pages,omitempty" form:"pages" bson:"bookpages,omitempty"`
+	BookYear   int                `json:"year,omitempty" form:"year" bson:"bookyear,omitempty"`
 }
 
 // Wraps the "Template" struct to associate a necessary method
@@ -169,13 +169,13 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 	var ret []map[string]interface{}
 	for _, res := range results {
 		ret = append(ret, map[string]interface{}{
-			"mongo_id":   res.MongoID.Hex(),
-			"ID":         res.ID,
-			"BookName":   res.BookName,
-			"BookAuthor": res.BookAuthor,
-			"BookISBN":   res.BookISBN,
-			"BookPages":  res.BookPages,
-			"BookYear":   res.BookYear,
+			"mongo_id": res.MongoID.Hex(),
+			"id":       res.ID,
+			"title":    res.BookName,
+			"isbn":     res.BookISBN,
+			"author":   res.BookAuthor,
+			"pages":    fmt.Sprintf("%d", res.BookPages),
+			"year":     fmt.Sprintf("%d", res.BookYear),
 		})
 	}
 
@@ -382,26 +382,11 @@ func main() {
 
 	e.POST("/api/books", func(c echo.Context) error {
 		var book BookStore
-		book.ID = c.FormValue("ID")
-		book.BookName = c.FormValue("BookName")
-		book.BookAuthor = c.FormValue("BookAuthor")
-		book.BookISBN = c.FormValue("BookISBN")
-
-		pages := c.FormValue("BookPages")
-		year := c.FormValue("BookYear")
-
-		if pages != "" {
-			if p, err := strconv.Atoi(pages); err == nil {
-				book.BookPages = p
-			}
-		}
-		if year != "" {
-			if y, err := strconv.Atoi(year); err == nil {
-				book.BookYear = y
-			}
+		if err := c.Bind(&book); err != nil {
+			return c.String(http.StatusBadRequest, "Invalid JSON input")
 		}
 
-		if book.BookName == "" || book.ID == "" {
+		if book.ID == "" || book.BookName == "" {
 			return c.String(http.StatusBadRequest, "Missing required fields: BookName or ID")
 		}
 
@@ -463,7 +448,7 @@ func main() {
 		if book.BookName != "" && book.BookName != existingBook.BookName {
 			nameFilter := bson.M{
 				"bookname": book.BookName,
-				"id":       book.ID,
+				"ID":       book.ID,
 			}
 			count, err := coll.CountDocuments(context.TODO(), nameFilter)
 			if err != nil {
@@ -492,35 +477,35 @@ func main() {
 			}
 		}
 
-		updateFields := bson.M{}
+		update := bson.M{}
+		if book.BookName != "" {
+			update["bookname"] = book.BookName
+		}
 		if book.BookAuthor != "" {
-			updateFields["BookAuthor"] = book.BookAuthor
+			update["bookauthor"] = book.BookAuthor
+		}
+		if book.BookISBN != "" {
+			update["bookisbn"] = book.BookISBN
 		}
 		if book.BookPages != 0 {
-			updateFields["BookPages"] = book.BookPages
+			update["bookpages"] = book.BookPages
 		}
 		if book.BookYear != 0 {
-			updateFields["BookYear"] = book.BookYear
+			update["bookyear"] = book.BookYear
 		}
 
-		if len(updateFields) == 0 {
-			return c.String(http.StatusBadRequest, "No fields to update")
-		}
+		fmt.Printf("Update fields: %+v\n", update)
 
-		fmt.Printf("Update fields: %+v\n", updateFields)
-
-		update := bson.M{"$set": updateFields}
-		res, err := coll.UpdateOne(context.TODO(), filter, update)
+		res, err := coll.UpdateOne(context.TODO(), filter, bson.M{"$set": update})
 		if err != nil {
-			fmt.Printf("Update error: %v\n", err)
-			return c.String(http.StatusInternalServerError, "Update error: "+err.Error())
+			return c.String(http.StatusInternalServerError, "Update failed")
 		}
 		if res.MatchedCount == 0 {
 			return c.String(http.StatusNotFound, "Book not found")
 		}
 
-		fmt.Printf("Successfully updated book. Matched: %d, Modified: %d\n", res.MatchedCount, res.ModifiedCount)
-		return c.Render(http.StatusOK, "index", nil)
+		return c.NoContent(http.StatusOK)
+
 	})
 	e.DELETE("/api/books/:id", func(c echo.Context) error {
 		id := c.Param("id")
