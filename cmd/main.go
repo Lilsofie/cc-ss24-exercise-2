@@ -221,28 +221,6 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 	return ret
 }
 
-// func getAllBooksAPI(coll *mongo.Collection) []BookResponse {
-// 	cursor, err := coll.Find(context.TODO(), bson.D{{}})
-// 	var results []BookStore
-// 	if err = cursor.All(context.TODO(), &results); err != nil {
-// 		panic(err)
-// 	}
-
-// 	var ret []BookResponse
-// 	for _, res := range results {
-// 		ret = append(ret, BookResponse{
-// 			ID:      res.ID.Hex(),
-// 			Title:   res.BookName,
-// 			Author:  res.BookAuthor,
-// 			Pages:   fmt.Sprintf("%d", res.BookPages),
-// 			Edition: res.BookISBN,
-// 			Year:    fmt.Sprintf("%d", res.BookYear),
-// 		})
-// 	}
-
-// 	return ret
-// }
-
 func getBookByID(coll *mongo.Collection, id string) (map[string]interface{}, error) {
 	var book BookStore
 	err := coll.FindOne(context.TODO(), bson.M{"id": id}).Decode(&book)
@@ -349,12 +327,7 @@ func updateBook(coll *mongo.Collection, id string, bookReq BookRequest) error {
 }
 
 func deleteBook(coll *mongo.Collection, id string) error {
-	objID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return fmt.Errorf("invalid ID format")
-	}
-
-	filter := bson.D{{"_id", objID}}
+	filter := bson.M{"id": id}
 	result, err := coll.DeleteOne(context.TODO(), filter)
 	if err != nil {
 		return err
@@ -459,10 +432,10 @@ func main() {
 	// one by yourself!
 	coll, err := prepareDatabase(client, "exercise-2", "information")
 
-	// drop := coll.Drop(context.TODO())
-	// if drop != nil {
-	// 	log.Fatal("Failed to drop collection:", drop)
-	// }
+	drop := coll.Drop(context.TODO())
+	if drop != nil {
+		log.Fatal("Failed to drop collection:", drop)
+	}
 
 	prepareData(client, coll)
 
@@ -516,12 +489,10 @@ func main() {
 
 	e.GET("/api/books/:id", func(c echo.Context) error {
 		id := c.Param("id")
-
 		book, err := getBookByID(coll, id)
 		if err != nil {
-			return c.NoContent(http.StatusNoContent)
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "Book not found"})
 		}
-
 		return c.JSON(http.StatusOK, book)
 	})
 
@@ -576,7 +547,7 @@ func main() {
 
 		if err := createBook(coll, bookReq); err != nil {
 			if err.Error() == "book already exists" {
-				return c.JSON(http.StatusOK, map[string]string{"message": "Book already exists"})
+				return c.JSON(http.StatusConflict, map[string]string{"error": "Book already exists"})
 			}
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create book"})
 		}
@@ -597,11 +568,10 @@ func main() {
 		}
 
 		if err := updateBook(coll, id, bookReq); err != nil {
-			log.Printf("Update error: %v", err)
 			if err.Error() == "book not found" {
-				return c.NoContent(http.StatusNoContent)
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "Book not found"})
 			}
-			return c.JSON(http.StatusOK, map[string]string{"error": "Failed to update book"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to update book"})
 		}
 
 		return c.JSON(http.StatusOK, map[string]string{"message": "Book updated successfully"})
