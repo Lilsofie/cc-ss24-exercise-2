@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -168,9 +170,71 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 			"BookAuthor": res.BookAuthor,
 			"BookISBN":   res.BookISBN,
 			"BookPages":  res.BookPages,
+			"BookYear":   res.BookYear,
 		})
 	}
 
+	return ret
+}
+
+func findAuthors(coll *mongo.Collection) []map[string]interface{} {
+	cursor, err := coll.Find(context.TODO(), bson.D{{}})
+	if err != nil {
+		panic(err)
+	}
+
+	var results []BookStore
+	if err = cursor.All(context.TODO(), &results); err != nil {
+		panic(err)
+	}
+
+	authorBooks := make(map[string][]string)
+
+	for _, res := range results {
+		if res.BookISBN == "" || res.BookName == "" {
+			continue
+		}
+		authorBooks[res.BookAuthor] = append(authorBooks[res.BookAuthor], res.BookName)
+	}
+
+	var ret []map[string]interface{}
+	for author, books := range authorBooks {
+		ret = append(ret, map[string]interface{}{
+			"BookName":   books,
+			"BookAuthor": author,
+		})
+	}
+	return ret
+}
+
+func findYears(coll *mongo.Collection) []map[string]interface{} {
+	cursor, err := coll.Find(context.TODO(), bson.D{{}})
+	if err != nil {
+		panic(err)
+	}
+
+	var results []BookStore
+	if err = cursor.All(context.TODO(), &results); err != nil {
+		panic(err)
+	}
+
+	yearBooks := make(map[string][]string)
+
+	for _, res := range results {
+		if res.BookISBN == "" || res.BookName == "" {
+			continue
+		}
+		var year = strconv.Itoa(res.BookYear)
+		yearBooks[year] = append(yearBooks[year], res.BookName)
+	}
+
+	var ret []map[string]interface{}
+	for year, books := range yearBooks {
+		ret = append(ret, map[string]interface{}{
+			"BookYear": year,
+			"BookName": books,
+		})
+	}
 	return ret
 }
 
@@ -179,10 +243,11 @@ func main() {
 	// context returns; for this case, the local context is the main function
 	// By user defer function, we make sure we don't leave connections
 	// dangling despite the program crashing. Isn't this nice? :D
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	uri := os.Getenv("DATABASE_URI")
+	uri := os.Getenv("MONGODB_URI")
 	if len(uri) == 0 {
 		fmt.Printf("failure to load env variable\n")
 		os.Exit(1)
@@ -232,33 +297,232 @@ func main() {
 	// we prefix the route with /api to indicate more information or resources
 	// are available under such route.
 	e.GET("/", func(c echo.Context) error {
-		return c.Render(200, "index", nil)
+		return c.Render(http.StatusOK, "index", nil)
 	})
 
 	e.GET("/books", func(c echo.Context) error {
 		books := findAllBooks(coll)
-		return c.Render(200, "book-table", books)
+		return c.Render(http.StatusOK, "book-table", books)
 	})
 
 	e.GET("/authors", func(c echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
+		authors := findAuthors(coll)
+		return c.Render(http.StatusOK, "author-table", authors)
 	})
 
 	e.GET("/years", func(c echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
+		years := findYears(coll)
+		return c.Render(http.StatusOK, "year-table", years)
 	})
 
 	e.GET("/search", func(c echo.Context) error {
-		return c.Render(200, "search-bar", nil)
+		return c.Render(http.StatusOK, "search", nil)
 	})
 
 	e.GET("/create", func(c echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
+		return c.Render(http.StatusOK, "create", nil)
 	})
 
 	e.GET("/api/books", func(c echo.Context) error {
 		books := findAllBooks(coll)
 		return c.JSON(http.StatusOK, books)
+	})
+
+	e.GET("/api/search", func(c echo.Context) error {
+		query := c.QueryParam("q")
+		fmt.Println("query:", query)
+		if query == "" {
+			return c.String(http.StatusBadRequest, "Missing search query")
+		}
+
+		filter := bson.M{
+			"$or": []bson.M{
+				{"bookname": bson.M{"$regex": query, "$options": "i"}},
+				{"bookauthor": bson.M{"$regex": query, "$options": "i"}},
+				{"bookisbn": bson.M{"$regex": query, "$options": "i"}},
+			},
+		}
+
+		cursor, err := coll.Find(context.TODO(), filter)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "Search error: "+err.Error())
+		}
+		var results []BookStore
+		if err = cursor.All(context.TODO(), &results); err != nil {
+			return c.String(http.StatusInternalServerError, "Cursor error: "+err.Error())
+		}
+
+		if len(results) == 0 {
+			return c.String(http.StatusNotFound, "Entry not found")
+		}
+
+		var books []map[string]interface{}
+		for _, res := range results {
+			books = append(books, map[string]interface{}{
+				"ID":         res.ID.Hex(),
+				"BookName":   res.BookName,
+				"BookAuthor": res.BookAuthor,
+				"BookISBN":   res.BookISBN,
+				"BookPages":  res.BookPages,
+				"BookYear":   res.BookYear,
+			})
+		}
+		return c.Render(http.StatusOK, "book-table", books)
+	})
+
+	e.POST("/api/books", func(c echo.Context) error {
+		var book BookStore
+		book.BookName = c.FormValue("BookName")
+		book.BookAuthor = c.FormValue("BookAuthor")
+		book.BookISBN = c.FormValue("BookISBN")
+
+		pages := c.FormValue("BookPages")
+		year := c.FormValue("BookYear")
+
+		if pages != "" {
+			if p, err := strconv.Atoi(pages); err == nil {
+				book.BookPages = p
+			}
+		}
+		if year != "" {
+			if y, err := strconv.Atoi(year); err == nil {
+				book.BookYear = y
+			}
+		}
+
+		if book.BookName == "" {
+			return c.String(http.StatusBadRequest, "Missing required fields: BookName")
+		}
+
+		filter := bson.M{"bookname": book.BookName, "bookisbn": book.BookISBN}
+		fmt.Println("Received book name:", book.BookName)
+
+		count, err := coll.CountDocuments(context.TODO(), filter)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "DB error")
+		}
+		fmt.Println("Duplicate count for book name:", count)
+		if count > 0 {
+			return c.String(http.StatusConflict, "Duplicate entry")
+		}
+
+		result, err := coll.InsertOne(context.TODO(), book)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "Insert error")
+		}
+		fmt.Printf("inserted_id: %v\n", result.InsertedID)
+		return c.Render(http.StatusOK, "index", nil)
+
+	})
+
+	e.PUT("/api/books/:id", func(c echo.Context) error {
+		id := c.Param("id")
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return c.String(http.StatusBadRequest, "Invalid book ID")
+		}
+
+		var book BookStore
+		if err := c.Bind(&book); err != nil {
+			return c.String(http.StatusBadRequest, "Invalid request")
+		}
+
+		book.BookName = strings.TrimSpace(book.BookName)
+		book.BookAuthor = strings.TrimSpace(book.BookAuthor)
+		book.BookISBN = strings.TrimSpace(book.BookISBN)
+
+		if book.ID != primitive.NilObjectID && book.ID != objID {
+			return c.String(http.StatusBadRequest, "Book ID in body doesn't match URL parameter")
+		}
+
+		filter := bson.M{"_id": objID}
+		var existingBook BookStore
+		err = coll.FindOne(context.TODO(), filter).Decode(&existingBook)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				return c.String(http.StatusNotFound, "Book not found")
+			}
+			return c.String(http.StatusInternalServerError, "Database error")
+		}
+
+		fmt.Printf("Existing book: %+v\n", existingBook)
+		fmt.Printf("Update request: %+v\n", book)
+
+		if book.BookName != "" && book.BookName != existingBook.BookName {
+			nameFilter := bson.M{
+				"bookname": book.BookName,
+				"_id":      bson.M{"$ne": objID},
+			}
+			count, err := coll.CountDocuments(context.TODO(), nameFilter)
+			if err != nil {
+				fmt.Printf("Error checking BookName duplicates: %v\n", err)
+				return c.String(http.StatusInternalServerError, "Database error")
+			}
+			fmt.Printf("Books with same name (excluding current): %d\n", count)
+			if count > 0 {
+				return c.String(http.StatusConflict, "Book name already exists")
+			}
+		}
+
+		if book.BookISBN != "" && book.BookISBN != existingBook.BookISBN {
+			isbnFilter := bson.M{
+				"bookisbn": book.BookISBN,
+				"_id":      bson.M{"$ne": objID},
+			}
+			count, err := coll.CountDocuments(context.TODO(), isbnFilter)
+			if err != nil {
+				fmt.Printf("Error checking BookISBN duplicates: %v\n", err)
+				return c.String(http.StatusInternalServerError, "Database error")
+			}
+			fmt.Printf("Books with same ISBN (excluding current): %d\n", count)
+			if count > 0 {
+				return c.String(http.StatusConflict, "Book ISBN already exists")
+			}
+		}
+
+		updateFields := bson.M{}
+		if book.BookAuthor != "" {
+			updateFields["BookAuthor"] = book.BookAuthor
+		}
+		if book.BookPages != 0 {
+			updateFields["BookPages"] = book.BookPages
+		}
+		if book.BookYear != 0 {
+			updateFields["BookYear"] = book.BookYear
+		}
+
+		if len(updateFields) == 0 {
+			return c.String(http.StatusBadRequest, "No fields to update")
+		}
+
+		fmt.Printf("Update fields: %+v\n", updateFields)
+
+		update := bson.M{"$set": updateFields}
+		res, err := coll.UpdateOne(context.TODO(), filter, update)
+		if err != nil {
+			fmt.Printf("Update error: %v\n", err)
+			return c.String(http.StatusInternalServerError, "Update error: "+err.Error())
+		}
+		if res.MatchedCount == 0 {
+			return c.String(http.StatusNotFound, "Book not found")
+		}
+
+		fmt.Printf("Successfully updated book. Matched: %d, Modified: %d\n", res.MatchedCount, res.ModifiedCount)
+		return c.Render(http.StatusOK, "index", nil)
+	})
+	e.DELETE("/api/books/:id", func(c echo.Context) error {
+		id := c.Param("id")
+		objectID, err := primitive.ObjectIDFromHex(id)
+
+		res, err := coll.DeleteOne(context.TODO(), bson.M{"_id": objectID})
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "Delete error")
+		}
+		if res.DeletedCount == 0 {
+			return c.String(http.StatusNotFound, "Book not found")
+		}
+
+		return c.Render(http.StatusOK, "index", nil)
 	})
 
 	e.Logger.Fatal(e.Start(":3030"))

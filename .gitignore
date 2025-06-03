@@ -1,4 +1,4 @@
 data
 exercise-*.zip
 .DS_Store
-Dockerfile
+.env

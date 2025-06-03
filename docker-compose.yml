@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:7.0.20
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  app:
+    build:
+      context: .
+      platform: linux/amd64
+    container_name: cc-exercise-2
+    restart: unless-stopped
+    ports:
+      - "5000:6000"
+    environment:
+      - DATABASE_URI=mongodb://mongodb:27017
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo-data:
