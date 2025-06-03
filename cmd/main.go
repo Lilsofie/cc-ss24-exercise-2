@@ -325,7 +325,7 @@ func updateBook(coll *mongo.Collection, id string, bookReq BookRequest) error {
 }
 
 func deleteBook(coll *mongo.Collection, id string) error {
-	filter := bson.M{"id": id}
+	filter := bson.M{"ID": id}
 	result, err := coll.DeleteOne(context.TODO(), filter)
 	if err != nil {
 		return err
