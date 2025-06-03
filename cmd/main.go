@@ -283,6 +283,11 @@ func main() {
 	// one by yourself!
 	coll, err := prepareDatabase(client, "exercise-2", "information")
 
+	drop := coll.Drop(context.TODO())
+	if drop != nil {
+		log.Fatal("Failed to drop collection:", drop)
+	}
+
 	prepareData(client, coll)
 
 	// Here we prepare the server
