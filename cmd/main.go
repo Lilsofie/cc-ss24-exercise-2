@@ -25,13 +25,14 @@ import (
 // Defines a "model" that we can use to communicate with the
 // frontend or the database
 type BookStore struct {
-	MongoID    primitive.ObjectID `bson:"_id,omitempty"`
-	ID         string             `json:"id" form:"id" bson:"ID"`
-	BookName   string             `json:"title" form:"title" bson:"bookname"`
-	BookAuthor string             `json:"author,omitempty" form:"author" bson:"bookauthor,omitempty"`
-	BookISBN   string             `json:"isbn,omitempty" form:"isbn" bson:"bookisbn,omitempty"`
-	BookPages  int                `json:"pages,omitempty" form:"pages" bson:"bookpages,omitempty"`
-	BookYear   int                `json:"year,omitempty" form:"year" bson:"bookyear,omitempty"`
+	MongoID     primitive.ObjectID `bson:"_id,omitempty"`
+	ID          string             `json:"id" form:"id" bson:"ID"`
+	BookName    string             `json:"title" form:"title" bson:"bookname"`
+	BookAuthor  string             `json:"author,omitempty" form:"author" bson:"bookauthor,omitempty"`
+	BookEdition string             `json:"edition,omitempty" form:"edition" bson:"bookedtion, omitempty"`
+	BookISBN    string             `json:"isbn,omitempty" form:"isbn" bson:"bookisbn,omitempty"`
+	BookPages   int                `json:"pages,omitempty" form:"pages" bson:"bookpages,omitempty"`
+	BookYear    int                `json:"year,omitempty" form:"year" bson:"bookyear,omitempty"`
 }
 
 // Wraps the "Template" struct to associate a necessary method
@@ -98,28 +99,31 @@ func prepareDatabase(client *mongo.Client, dbName string, collecName string) (*m
 func prepareData(client *mongo.Client, coll *mongo.Collection) {
 	startData := []BookStore{
 		{
-			ID:         "1001",
-			BookName:   "The Vortex",
-			BookAuthor: "José Eustasio Rivera",
-			BookISBN:   "958-30-0804-4",
-			BookPages:  292,
-			BookYear:   1924,
+			ID:          "1001",
+			BookName:    "The Vortex",
+			BookAuthor:  "José Eustasio Rivera",
+			BookISBN:    "958-30-0804-4",
+			BookEdition: "1st Edition",
+			BookPages:   292,
+			BookYear:    1924,
 		},
 		{
-			ID:         "1002",
-			BookName:   "Frankenstein",
-			BookAuthor: "Mary Shelley",
-			BookISBN:   "978-3-649-64609-9",
-			BookPages:  280,
-			BookYear:   1818,
+			ID:          "1002",
+			BookName:    "Frankenstein",
+			BookAuthor:  "Mary Shelley",
+			BookISBN:    "978-3-649-64609-9",
+			BookEdition: "2nd Edition",
+			BookPages:   280,
+			BookYear:    1818,
 		},
 		{
-			ID:         "1003",
-			BookName:   "The Black Cat",
-			BookAuthor: "Edgar Allan Poe",
-			BookISBN:   "978-3-99168-238-7",
-			BookPages:  280,
-			BookYear:   1843,
+			ID:          "1003",
+			BookName:    "The Black Cat",
+			BookAuthor:  "Edgar Allan Poe",
+			BookISBN:    "978-3-99168-238-7",
+			BookEdition: "3rd Edition",
+			BookPages:   280,
+			BookYear:    1843,
 		},
 	}
 
@@ -174,6 +178,7 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 			"title":    res.BookName,
 			"isbn":     res.BookISBN,
 			"author":   res.BookAuthor,
+			"edition":  res.BookEdition,
 			"pages":    fmt.Sprintf("%d", res.BookPages),
 			"year":     fmt.Sprintf("%d", res.BookYear),
 		})
@@ -283,10 +288,10 @@ func main() {
 	// one by yourself!
 	coll, err := prepareDatabase(client, "exercise-2", "information")
 
-	// drop := coll.Drop(context.TODO())
-	// if drop != nil {
-	// 	log.Fatal("Failed to drop collection:", drop)
-	// }
+	drop := coll.Drop(context.TODO())
+	if drop != nil {
+		log.Fatal("Failed to drop collection:", drop)
+	}
 
 	prepareData(client, coll)
 
@@ -350,6 +355,7 @@ func main() {
 				{"bookname": bson.M{"$regex": query, "$options": "i"}},
 				{"bookauthor": bson.M{"$regex": query, "$options": "i"}},
 				{"bookisbn": bson.M{"$regex": query, "$options": "i"}},
+				{"bookedition": bson.M{"$regex": query, "$options": "i"}},
 			},
 		}
 
@@ -362,19 +368,16 @@ func main() {
 			return c.String(http.StatusInternalServerError, "Cursor error: "+err.Error())
 		}
 
-		if len(results) == 0 {
-			return c.String(http.StatusNotFound, "Entry not found")
-		}
-
 		var books []map[string]interface{}
 		for _, res := range results {
 			books = append(books, map[string]interface{}{
-				"ID":         res.ID,
-				"BookName":   res.BookName,
-				"BookAuthor": res.BookAuthor,
-				"BookISBN":   res.BookISBN,
-				"BookPages":  res.BookPages,
-				"BookYear":   res.BookYear,
+				"id":      res.ID,
+				"title":   res.BookName,
+				"author":  res.BookAuthor,
+				"isbn":    res.BookISBN,
+				"edition": res.BookEdition,
+				"pages":   res.BookPages,
+				"year":    res.BookYear,
 			})
 		}
 		return c.Render(http.StatusOK, "book-table", books)
@@ -426,6 +429,7 @@ func main() {
 
 		book.BookName = strings.TrimSpace(book.BookName)
 		book.BookAuthor = strings.TrimSpace(book.BookAuthor)
+		book.BookEdition = strings.TrimSpace(book.BookEdition)
 		book.BookISBN = strings.TrimSpace(book.BookISBN)
 
 		if book.ID != "" && book.ID != id {
@@ -486,6 +490,9 @@ func main() {
 		}
 		if book.BookISBN != "" {
 			update["bookisbn"] = book.BookISBN
+		}
+		if book.BookEdition != "" {
+			update["bookedition"] = book.BookEdition
 		}
 		if book.BookPages != 0 {
 			update["bookpages"] = book.BookPages

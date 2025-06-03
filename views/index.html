@@ -70,6 +70,7 @@
     <th>Author</th>
     <th>ISBN</th>
     <th>Pages</th>
+    <th>Edition</th>
     <th>Year</th>
     <th>ID</th>
   </tr>
@@ -79,6 +80,7 @@
     <th> {{ .author }} </th>
     <th> {{ .isbn }} </th>
     <th> {{ .pages }} </th>
+    <th> {{ .edition }} </th>
     <th> {{ .year }} </th>
     <th> {{ .id }}</th>
   </tr>
@@ -134,6 +136,7 @@
   <input name="title" placeholder="Name" required><br>
   <input name="author" placeholder="Author"><br>
   <input name="isbn" placeholder="ISBN"><br>
+  <input name="edition" placeholder="Edition"><br>
   <input name="pages" type="number" placeholder="Pages"><br>
   <input name="year" type="number" placeholder="Year"><br>
   <button type="submit">Create Book</button>
