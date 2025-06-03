@@ -6,7 +6,7 @@ services:
     container_name: mongodb
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "36184:36184"
     volumes:
       - mongo-data:/data/db
 
@@ -20,7 +20,7 @@ services:
     ports:
       - "5000:3030"
     environment:
-      - DATABASE_URI=mongodb://mongodb:27017
+      - DATABASE_URI=mongodb://mongodb:testdatabase@mongodb_port
     depends_on:
       - mongodb
 
