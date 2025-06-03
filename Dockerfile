@@ -13,7 +13,7 @@ FROM --platform=linux/amd64 alpine:latest
 
 WORKDIR /app
 
-COPY --from=builder /app/main ./cmd
+COPY --from=builder /app/main .
 
 EXPOSE 6000
 
