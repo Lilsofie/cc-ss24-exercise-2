@@ -17,6 +17,6 @@ COPY --from=builder /app/main .
 COPY --from=builder /app/views ./views
 COPY --from=builder /app/css ./css
 
-EXPOSE 6000
+EXPOSE 3030
 
 CMD ["./main"]
