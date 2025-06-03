@@ -24,7 +24,8 @@ import (
 // Defines a "model" that we can use to communicate with the
 // frontend or the database
 type BookStore struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty"`
+	MongoID    primitive.ObjectID `bson:"_id,omitempty"`
+	ID         string
 	BookName   string
 	BookAuthor string
 	BookISBN   string
@@ -48,6 +49,30 @@ type BookResponse struct {
 	Pages   string `json:"pages"`
 	Edition string `json:"edition"`
 	Year    string `json:"year"`
+}
+
+var idCounter int64 = 1000000
+
+func getNextID(coll *mongo.Collection) string {
+	pipeline := []bson.M{
+		{"$match": bson.M{"id": bson.M{"$exists": true}}},
+		{"$sort": bson.M{"id": -1}},
+		{"$limit": 1},
+	}
+
+	cursor, err := coll.Aggregate(context.TODO(), pipeline)
+	if err == nil {
+		var results []BookStore
+		if err = cursor.All(context.TODO(), &results); err == nil && len(results) > 0 {
+			if existingID, err := strconv.ParseInt(results[0].ID, 10, 64); err == nil {
+				idCounter = existingID + 1
+			}
+		}
+	}
+
+	id := strconv.FormatInt(idCounter, 10)
+	idCounter++
+	return id
 }
 
 // Wraps the "Template" struct to associate a necessary method
@@ -114,6 +139,7 @@ func prepareDatabase(client *mongo.Client, dbName string, collecName string) (*m
 func prepareData(client *mongo.Client, coll *mongo.Collection) {
 	startData := []BookStore{
 		{
+			ID:         getNextID(coll),
 			BookName:   "The Vortex",
 			BookAuthor: "José Eustasio Rivera",
 			BookISBN:   "958-30-0804-4",
@@ -121,6 +147,7 @@ func prepareData(client *mongo.Client, coll *mongo.Collection) {
 			BookYear:   1924,
 		},
 		{
+			ID:         getNextID(coll),
 			BookName:   "Frankenstein",
 			BookAuthor: "Mary Shelley",
 			BookISBN:   "978-3-649-64609-9",
@@ -128,6 +155,7 @@ func prepareData(client *mongo.Client, coll *mongo.Collection) {
 			BookYear:   1818,
 		},
 		{
+			ID:         getNextID(coll),
 			BookName:   "The Black Cat",
 			BookAuthor: "Edgar Allan Poe",
 			BookISBN:   "978-3-99168-238-7",
@@ -182,7 +210,7 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 	var ret []map[string]interface{}
 	for _, res := range results {
 		ret = append(ret, map[string]interface{}{
-			"ID":         res.ID.Hex(),
+			"ID":         res.ID,
 			"BookName":   res.BookName,
 			"BookAuthor": res.BookAuthor,
 			"BookISBN":   res.BookISBN,
@@ -215,27 +243,30 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 // 	return ret
 // }
 
-func getBookByID(coll *mongo.Collection, id string) (*BookStore, error) {
-	objID, err := primitive.ObjectIDFromHex(id)
+func getBookByID(coll *mongo.Collection, id string) (map[string]interface{}, error) {
+	var book BookStore
+	err := coll.FindOne(context.TODO(), bson.M{"id": id}).Decode(&book)
 	if err != nil {
 		return nil, err
 	}
 
-	var book BookStore
-	err = coll.FindOne(context.TODO(), bson.D{{"_id", objID}}).Decode(&book)
-	if err != nil {
-		return nil, err
-	}
-	return &book, nil
+	return map[string]interface{}{
+		"ID":         book.ID,
+		"BookName":   book.BookName,
+		"BookAuthor": book.BookAuthor,
+		"BookISBN":   book.BookISBN,
+		"BookPages":  book.BookPages,
+		"BookYear":   book.BookYear,
+	}, nil
 }
 
 func bookExists(coll *mongo.Collection, book BookStore) bool {
-	filter := bson.D{
-		{"bookname", book.BookName},
-		{"bookauthor", book.BookAuthor},
-		{"bookyear", book.BookYear},
-		{"bookpages", book.BookPages},
-		{"bookisbn", book.BookISBN},
+	filter := bson.M{
+		"bookname":   book.BookName,
+		"bookauthor": book.BookAuthor,
+		"bookyear":   book.BookYear,
+		"bookpages":  book.BookPages,
+		"bookisbn":   book.BookISBN,
 	}
 
 	var result BookStore
@@ -258,7 +289,13 @@ func createBook(coll *mongo.Collection, bookReq BookRequest) error {
 		}
 	}
 
+	bookID := bookReq.ID
+	if bookID == "" {
+		bookID = getNextID(coll)
+	}
+
 	book := BookStore{
+		ID:         bookID,
 		BookName:   bookReq.Title,
 		BookAuthor: bookReq.Author,
 		BookISBN:   bookReq.Edition,
@@ -275,16 +312,8 @@ func createBook(coll *mongo.Collection, bookReq BookRequest) error {
 }
 
 func updateBook(coll *mongo.Collection, id string, bookReq BookRequest) error {
-	// Convert hex string to ObjectID
-	objID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return fmt.Errorf("invalid ID format")
-	}
+	filter := bson.M{"id": id}
 
-	// Use _id field with ObjectID
-	filter := bson.D{{"_id", objID}}
-
-	// Convert string values to appropriate types
 	pages := 0
 	if bookReq.Pages != "" {
 		if p, err := fmt.Sscanf(bookReq.Pages, "%d", &pages); err != nil || p != 1 {
@@ -299,13 +328,13 @@ func updateBook(coll *mongo.Collection, id string, bookReq BookRequest) error {
 		}
 	}
 
-	update := bson.D{{"$set", bson.D{
-		{"bookname", bookReq.Title},
-		{"bookauthor", bookReq.Author},
-		{"bookisbn", bookReq.Edition},
-		{"bookpages", pages},
-		{"bookyear", year},
-	}}}
+	update := bson.M{"$set": bson.M{
+		"bookname":   bookReq.Title,
+		"bookauthor": bookReq.Author,
+		"bookisbn":   bookReq.Edition,
+		"bookpages":  pages,
+		"bookyear":   year,
+	}}
 
 	result, err := coll.UpdateOne(context.TODO(), filter, update)
 	if err != nil {
@@ -469,7 +498,6 @@ func main() {
 
 	e.GET("/years", func(c echo.Context) error {
 		years := getYears(coll)
-		fmt.Println(years)
 		return c.Render(200, "year-table", years)
 	})
 
@@ -491,7 +519,7 @@ func main() {
 
 		book, err := getBookByID(coll, id)
 		if err != nil {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "Book not found"})
+			return c.NoContent(http.StatusNoContent)
 		}
 
 		return c.JSON(http.StatusOK, book)
