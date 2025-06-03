@@ -14,6 +14,8 @@ FROM --platform=linux/amd64 alpine:latest
 WORKDIR /app
 
 COPY --from=builder /app/main .
+COPY --from=builder /app/views ./views
+COPY --from=builder /app/css ./css
 
 EXPOSE 6000
 
