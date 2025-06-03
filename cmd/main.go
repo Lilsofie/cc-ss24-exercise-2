@@ -325,7 +325,7 @@ func updateBook(coll *mongo.Collection, id string, bookReq BookRequest) error {
 }
 
 func deleteBook(coll *mongo.Collection, id string) error {
-	filter := bson.M{"ID": id}
+	filter := bson.M{"id": id}
 	result, err := coll.DeleteOne(context.TODO(), filter)
 	if err != nil {
 		return err
@@ -535,6 +535,7 @@ func main() {
 
 	e.POST("/api/books", func(c echo.Context) error {
 		var bookReq BookRequest
+
 		if err := c.Bind(&bookReq); err != nil {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		}
