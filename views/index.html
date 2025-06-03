@@ -130,8 +130,9 @@
 {{ define "create" }}
 <h2>Add New Book</h2>
 <form action="/api/books" method="post">
+  <input name="ID" placeholder="ID" required><br>
   <input name="BookName" placeholder="Name" required><br>
-  <input name="BookAuthor" placeholder="Author" required><br>
+  <input name="BookAuthor" placeholder="Author"><br>
   <input name="BookISBN" placeholder="ISBN" required><br>
   <input name="BookPages" type="number" placeholder="Pages"><br>
   <input name="BookYear" type="number" placeholder="Year"><br>

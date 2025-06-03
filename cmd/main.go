@@ -25,7 +25,8 @@ import (
 // Defines a "model" that we can use to communicate with the
 // frontend or the database
 type BookStore struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty"`
+	MongoID    primitive.ObjectID `bson:"_id,omitempty"`
+	ID         string             `json:"ID" bson:"ID"`
 	BookName   string
 	BookAuthor string
 	BookISBN   string
@@ -97,6 +98,7 @@ func prepareDatabase(client *mongo.Client, dbName string, collecName string) (*m
 func prepareData(client *mongo.Client, coll *mongo.Collection) {
 	startData := []BookStore{
 		{
+			ID:         "1001",
 			BookName:   "The Vortex",
 			BookAuthor: "José Eustasio Rivera",
 			BookISBN:   "958-30-0804-4",
@@ -104,6 +106,7 @@ func prepareData(client *mongo.Client, coll *mongo.Collection) {
 			BookYear:   1924,
 		},
 		{
+			ID:         "1002",
 			BookName:   "Frankenstein",
 			BookAuthor: "Mary Shelley",
 			BookISBN:   "978-3-649-64609-9",
@@ -111,6 +114,7 @@ func prepareData(client *mongo.Client, coll *mongo.Collection) {
 			BookYear:   1818,
 		},
 		{
+			ID:         "1003",
 			BookName:   "The Black Cat",
 			BookAuthor: "Edgar Allan Poe",
 			BookISBN:   "978-3-99168-238-7",
@@ -165,7 +169,8 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 	var ret []map[string]interface{}
 	for _, res := range results {
 		ret = append(ret, map[string]interface{}{
-			"ID":         res.ID.Hex(),
+			"mongo_id":   res.MongoID.Hex(),
+			"ID":         res.ID,
 			"BookName":   res.BookName,
 			"BookAuthor": res.BookAuthor,
 			"BookISBN":   res.BookISBN,
@@ -359,7 +364,7 @@ func main() {
 		var books []map[string]interface{}
 		for _, res := range results {
 			books = append(books, map[string]interface{}{
-				"ID":         res.ID.Hex(),
+				"ID":         res.ID,
 				"BookName":   res.BookName,
 				"BookAuthor": res.BookAuthor,
 				"BookISBN":   res.BookISBN,
@@ -372,6 +377,7 @@ func main() {
 
 	e.POST("/api/books", func(c echo.Context) error {
 		var book BookStore
+		book.ID = c.FormValue("ID")
 		book.BookName = c.FormValue("BookName")
 		book.BookAuthor = c.FormValue("BookAuthor")
 		book.BookISBN = c.FormValue("BookISBN")
@@ -390,11 +396,17 @@ func main() {
 			}
 		}
 
-		if book.BookName == "" {
-			return c.String(http.StatusBadRequest, "Missing required fields: BookName")
+		if book.BookName == "" || book.ID == "" {
+			return c.String(http.StatusBadRequest, "Missing required fields: BookName or ID")
 		}
 
-		filter := bson.M{"bookname": book.BookName, "bookisbn": book.BookISBN}
+		filter := bson.M{
+			"$or": []bson.M{
+				{"ID": book.ID},
+				{"bookname": book.BookName},
+			},
+		}
+
 		fmt.Println("Received book name:", book.BookName)
 
 		count, err := coll.CountDocuments(context.TODO(), filter)
@@ -417,11 +429,6 @@ func main() {
 
 	e.PUT("/api/books/:id", func(c echo.Context) error {
 		id := c.Param("id")
-		objID, err := primitive.ObjectIDFromHex(id)
-		if err != nil {
-			return c.String(http.StatusBadRequest, "Invalid book ID")
-		}
-
 		var book BookStore
 		if err := c.Bind(&book); err != nil {
 			return c.String(http.StatusBadRequest, "Invalid request")
@@ -431,11 +438,11 @@ func main() {
 		book.BookAuthor = strings.TrimSpace(book.BookAuthor)
 		book.BookISBN = strings.TrimSpace(book.BookISBN)
 
-		if book.ID != primitive.NilObjectID && book.ID != objID {
+		if book.ID != "" && book.ID != id {
 			return c.String(http.StatusBadRequest, "Book ID in body doesn't match URL parameter")
 		}
 
-		filter := bson.M{"_id": objID}
+		filter := bson.M{"ID": id}
 		var existingBook BookStore
 		err = coll.FindOne(context.TODO(), filter).Decode(&existingBook)
 		if err != nil {
@@ -451,7 +458,7 @@ func main() {
 		if book.BookName != "" && book.BookName != existingBook.BookName {
 			nameFilter := bson.M{
 				"bookname": book.BookName,
-				"_id":      bson.M{"$ne": objID},
+				"id":       book.ID,
 			}
 			count, err := coll.CountDocuments(context.TODO(), nameFilter)
 			if err != nil {
@@ -467,7 +474,7 @@ func main() {
 		if book.BookISBN != "" && book.BookISBN != existingBook.BookISBN {
 			isbnFilter := bson.M{
 				"bookisbn": book.BookISBN,
-				"_id":      bson.M{"$ne": objID},
+				"id":       book.ID,
 			}
 			count, err := coll.CountDocuments(context.TODO(), isbnFilter)
 			if err != nil {
@@ -512,9 +519,8 @@ func main() {
 	})
 	e.DELETE("/api/books/:id", func(c echo.Context) error {
 		id := c.Param("id")
-		objectID, err := primitive.ObjectIDFromHex(id)
 
-		res, err := coll.DeleteOne(context.TODO(), bson.M{"_id": objectID})
+		res, err := coll.DeleteOne(context.TODO(), bson.M{"ID": id})
 		if err != nil {
 			return c.String(http.StatusInternalServerError, "Delete error")
 		}
@@ -522,7 +528,7 @@ func main() {
 			return c.String(http.StatusNotFound, "Book not found")
 		}
 
-		return c.Render(http.StatusOK, "index", nil)
+		return c.NoContent(http.StatusOK)
 	})
 
 	e.Logger.Fatal(e.Start(":3030"))
