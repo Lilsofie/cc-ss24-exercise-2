@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:7.0.20
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  app:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cc-exercise-2
+    restart: unless-stopped
+    ports:
+      - "5000:3030"
+    environment:
+      - DATABASE_URI=${DATABASE_URI:-mongodb://mongodb:27017}
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo-data:

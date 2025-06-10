@@ -19,16 +19,16 @@
     <div hx-get="/books" hx-trigger="click" hx-target="#page-content" class="p-pointer">
       <span style="padding: 8px 0px; display: block;">Books</span>
     </div>
-    <div hx-get="/authors" hx-trigger="click" class="p-pointer">
+    <div hx-get="/authors" hx-trigger="click" hx-target="#page-content" class="p-pointer">
       <span style="padding: 8px 0px; display: block;">Authors</span>
     </div>
-    <div hx-get="/years" hx-trigger="click" class="p-pointer">
+    <div hx-get="/years" hx-trigger="click" hx-target="#page-content" class="p-pointer">
       <span style="padding: 8px 0px; display: block;">Years</span>
     </div>
     <div hx-get="/search" hx-trigger="click" hx-target="#page-content" class="p-pointer">
       <span style="padding: 8px 0px; display: block;">Search</span>
     </div>
-    <div hx-get="/create" hx-trigger="click" class="p-pointer">
+    <div hx-get="/create" hx-trigger="click" hx-target="#page-content" class="p-pointer">
       <span style="padding: 8px 0px; display: block;">Create</span>
     </div>
   </div>
@@ -83,9 +83,55 @@
 {{ end }}
 
 
-{{ block "search-bar" . }}
-<div class="input_wrap">
-  <input type="text" required />
-  <label>Search parameter</label>
+{{ block "author-table" . }}
+<table>
+  <tr>
+    <th>Author</th>
+    <th>Book Name</th>
+  </tr>
+  {{ range . }}
+  <tr id="row-{{ .ID }}">
+    <th> {{ .BookAuthor }} </th>
+    <th>{{ .BookName }}</th>
+  </tr>
+  {{ end }}
+</table>
+{{ end }}
+
+
+{{ block "year-table" . }}
+<table>
+  <tr>
+    <th>Year</th>
+    <th>Book Name</th>
+  </tr>
+  {{ range . }}
+  <tr id="row-{{ .ID }}">
+    <th> {{ .BookYear }} </th>
+    <th> {{ .BookName }} </th>
+  </tr>
+  {{ end }}
+</table>
+{{ end }}
+
+{{ block "search" . }}
+<div style="padding: 1rem;">
+  <form hx-get="/api/search" hx-trigger="submit" hx-include="[name='q']" style="display: flex; gap: 0.5rem; align-items: center;">
+    <input type="text" name="q" required placeholder="Search by name, author, or ISBN" style="flex: 1; padding: 0.5rem;" />
+    <button type="submit" style="padding: 0.5rem 1rem;">Search</button>
+  </form>
 </div>
+{{ end }}
+
+
+{{ define "create" }}
+<h2>Add New Book</h2>
+<form action="/api/books" method="post">
+  <input name="id" placeholder="ID" required><br>
+  <input name="title" placeholder="Name" required><br>
+  <input name="author" placeholder="Author"><br>
+  <input name="pages"  placeholder="Pages"><br>
+  <input name="year"  placeholder="Year"><br>
+  <button type="submit">Create Book</button>
+</form>
 {{ end }}

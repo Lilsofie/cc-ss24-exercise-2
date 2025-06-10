@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -23,12 +23,54 @@ import (
 // Defines a "model" that we can use to communicate with the
 // frontend or the database
 type BookStore struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty"`
+	ID         string
 	BookName   string
 	BookAuthor string
 	BookISBN   string
 	BookPages  int
 	BookYear   int
+}
+
+type BookRequest struct {
+	ID      string `json:"id" form:"id"`
+	Title   string `json:"title" form:"title"`
+	Author  string `json:"author" form:"author"`
+	Pages   string `json:"pages,omitempty" form:"pages, omitempty"`
+	Edition string `json:"edition,omitempty" form:"edition, omitempty"`
+	Year    string `json:"year,omitempty" form:"year, omitempty"`
+}
+
+type BookResponse struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Author  string `json:"author"`
+	Pages   string `json:"pages"`
+	Edition string `json:"edition"`
+	Year    string `json:"year"`
+}
+
+var idCounter int64 = 1000000
+
+func getNextID(coll *mongo.Collection) string {
+	pipeline := []bson.M{
+		{"$match": bson.M{"id": bson.M{"$exists": true}}},
+		{"$sort": bson.M{"id": -1}},
+		{"$limit": 1},
+	}
+
+	cursor, err := coll.Aggregate(context.TODO(), pipeline)
+	if err == nil {
+		var results []BookStore
+		if err = cursor.All(context.TODO(), &results); err == nil && len(results) > 0 {
+			if existingID, err := strconv.ParseInt(results[0].ID, 10, 64); err == nil {
+				idCounter = existingID + 1
+			}
+		}
+	}
+
+	id := strconv.FormatInt(idCounter, 10)
+	idCounter++
+	return id
 }
 
 // Wraps the "Template" struct to associate a necessary method
@@ -95,6 +137,7 @@ func prepareDatabase(client *mongo.Client, dbName string, collecName string) (*m
 func prepareData(client *mongo.Client, coll *mongo.Collection) {
 	startData := []BookStore{
 		{
+			ID:         getNextID(coll),
 			BookName:   "The Vortex",
 			BookAuthor: "José Eustasio Rivera",
 			BookISBN:   "958-30-0804-4",
@@ -102,6 +145,7 @@ func prepareData(client *mongo.Client, coll *mongo.Collection) {
 			BookYear:   1924,
 		},
 		{
+			ID:         getNextID(coll),
 			BookName:   "Frankenstein",
 			BookAuthor: "Mary Shelley",
 			BookISBN:   "978-3-649-64609-9",
@@ -109,6 +153,7 @@ func prepareData(client *mongo.Client, coll *mongo.Collection) {
 			BookYear:   1818,
 		},
 		{
+			ID:         getNextID(coll),
 			BookName:   "The Black Cat",
 			BookAuthor: "Edgar Allan Poe",
 			BookISBN:   "978-3-99168-238-7",
@@ -163,7 +208,7 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 	var ret []map[string]interface{}
 	for _, res := range results {
 		ret = append(ret, map[string]interface{}{
-			"ID":         res.ID.Hex(),
+			"ID":         res.ID,
 			"BookName":   res.BookName,
 			"BookAuthor": res.BookAuthor,
 			"BookISBN":   res.BookISBN,
@@ -174,11 +219,183 @@ func findAllBooks(coll *mongo.Collection) []map[string]interface{} {
 	return ret
 }
 
+func getBookByID(coll *mongo.Collection, id string) (map[string]interface{}, error) {
+	var book BookStore
+	err := coll.FindOne(context.TODO(), bson.M{"id": id}).Decode(&book)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"ID":         book.ID,
+		"BookName":   book.BookName,
+		"BookAuthor": book.BookAuthor,
+		"BookISBN":   book.BookISBN,
+		"BookPages":  book.BookPages,
+		"BookYear":   book.BookYear,
+	}, nil
+}
+
+func bookExists(coll *mongo.Collection, book BookStore) bool {
+	filter := bson.M{
+		"bookname":   book.BookName,
+		"bookauthor": book.BookAuthor,
+		"bookyear":   book.BookYear,
+		"bookpages":  book.BookPages,
+		"bookisbn":   book.BookISBN,
+	}
+
+	var result BookStore
+	err := coll.FindOne(context.TODO(), filter).Decode(&result)
+	return err == nil
+}
+
+func createBook(coll *mongo.Collection, bookReq BookRequest) error {
+	pages := 0
+	if bookReq.Pages != "" {
+		if p, err := fmt.Sscanf(bookReq.Pages, "%d", &pages); err != nil || p != 1 {
+			pages = 0
+		}
+	}
+
+	year := 0
+	if bookReq.Year != "" {
+		if y, err := fmt.Sscanf(bookReq.Year, "%d", &year); err != nil || y != 1 {
+			year = 0
+		}
+	}
+
+	bookID := bookReq.ID
+	if bookID == "" {
+		bookID = getNextID(coll)
+	}
+
+	book := BookStore{
+		ID:         bookID,
+		BookName:   bookReq.Title,
+		BookAuthor: bookReq.Author,
+		BookISBN:   bookReq.Edition,
+		BookPages:  pages,
+		BookYear:   year,
+	}
+
+	if bookExists(coll, book) {
+		return fmt.Errorf("book already exists")
+	}
+
+	_, err := coll.InsertOne(context.TODO(), book)
+	return err
+}
+
+func updateBook(coll *mongo.Collection, id string, bookReq BookRequest) error {
+	filter := bson.M{"id": id}
+
+	pages := 0
+	if bookReq.Pages != "" {
+		if p, err := fmt.Sscanf(bookReq.Pages, "%d", &pages); err != nil || p != 1 {
+			pages = 0
+		}
+	}
+
+	year := 0
+	if bookReq.Year != "" {
+		if y, err := fmt.Sscanf(bookReq.Year, "%d", &year); err != nil || y != 1 {
+			year = 0
+		}
+	}
+
+	update := bson.M{"$set": bson.M{
+		"bookname":   bookReq.Title,
+		"bookauthor": bookReq.Author,
+		"bookisbn":   bookReq.Edition,
+		"bookpages":  pages,
+		"bookyear":   year,
+	}}
+
+	result, err := coll.UpdateOne(context.TODO(), filter, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("book not found")
+	}
+
+	return nil
+}
+
+func deleteBook(coll *mongo.Collection, id string) error {
+	filter := bson.M{"id": id}
+	result, err := coll.DeleteOne(context.TODO(), filter)
+	if err != nil {
+		return err
+	}
+
+	if result.DeletedCount == 0 {
+		return fmt.Errorf("book not found")
+	}
+
+	return nil
+}
+
+func getAuthors(coll *mongo.Collection) []map[string]interface{} {
+	cursor, err := coll.Find(context.TODO(), bson.D{{}})
+	var results []BookStore
+	if err = cursor.All(context.TODO(), &results); err != nil {
+		panic(err)
+	}
+
+	authorBooks := make(map[string][]string)
+
+	for _, res := range results {
+		if res.BookISBN == "" || res.BookName == "" {
+			continue
+		}
+		authorBooks[res.BookAuthor] = append(authorBooks[res.BookAuthor], res.BookName)
+	}
+
+	var authors []map[string]interface{}
+	for author, books := range authorBooks {
+		authors = append(authors, map[string]interface{}{
+			"BookName":   books,
+			"BookAuthor": author,
+		})
+	}
+	return authors
+}
+
+func getYears(coll *mongo.Collection) []map[string]interface{} {
+	cursor, err := coll.Find(context.TODO(), bson.D{{}})
+	var results []BookStore
+	if err = cursor.All(context.TODO(), &results); err != nil {
+		panic(err)
+	}
+
+	yearBooks := make(map[string][]string)
+	for _, res := range results {
+		if res.BookISBN == "" || res.BookName == "" {
+			continue
+		}
+		var year = strconv.Itoa(res.BookYear)
+		yearBooks[year] = append(yearBooks[year], res.BookName)
+	}
+
+	var years []map[string]interface{}
+	for year, books := range yearBooks {
+		years = append(years, map[string]interface{}{
+			"BookYear": year,
+			"BookName": books,
+		})
+	}
+	return years
+}
+
 func main() {
 	// Connect to the database. Such defer keywords are used once the local
 	// context returns; for this case, the local context is the main function
 	// By user defer function, we make sure we don't leave connections
 	// dangling despite the program crashing. Isn't this nice? :D
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -213,6 +430,11 @@ func main() {
 	// one by yourself!
 	coll, err := prepareDatabase(client, "exercise-2", "information")
 
+	// drop := coll.Drop(context.TODO())
+	// if drop != nil {
+	// 	log.Fatal("Failed to drop collection:", drop)
+	// }
+
 	prepareData(client, coll)
 
 	// Here we prepare the server
@@ -232,33 +454,139 @@ func main() {
 	// we prefix the route with /api to indicate more information or resources
 	// are available under such route.
 	e.GET("/", func(c echo.Context) error {
-		return c.Render(200, "index", nil)
+		return c.Render(http.StatusOK, "index", nil)
 	})
 
 	e.GET("/books", func(c echo.Context) error {
 		books := findAllBooks(coll)
-		return c.Render(200, "book-table", books)
+		return c.Render(http.StatusOK, "book-table", books)
 	})
 
 	e.GET("/authors", func(c echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
+		authors := getAuthors(coll)
+		return c.Render(200, "author-table", authors)
 	})
 
 	e.GET("/years", func(c echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
+		years := getYears(coll)
+		return c.Render(200, "year-table", years)
 	})
 
 	e.GET("/search", func(c echo.Context) error {
-		return c.Render(200, "search-bar", nil)
+		return c.Render(http.StatusOK, "search", nil)
 	})
 
 	e.GET("/create", func(c echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
+		return c.Render(http.StatusOK, "create", nil)
 	})
 
 	e.GET("/api/books", func(c echo.Context) error {
 		books := findAllBooks(coll)
 		return c.JSON(http.StatusOK, books)
+	})
+
+	e.GET("/api/books/:id", func(c echo.Context) error {
+		id := c.Param("id")
+		book, err := getBookByID(coll, id)
+		if err != nil {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "Book not found"})
+		}
+		return c.JSON(http.StatusOK, book)
+	})
+
+	e.GET("/api/search", func(c echo.Context) error {
+		query := c.QueryParam("q")
+		fmt.Println("query:", query)
+		if query == "" {
+			return c.String(http.StatusBadRequest, "Missing search query")
+		}
+
+		filter := bson.M{
+			"$or": []bson.M{
+				{"bookname": bson.M{"$regex": query, "$options": "i"}},
+				{"bookauthor": bson.M{"$regex": query, "$options": "i"}},
+				{"bookisbn": bson.M{"$regex": query, "$options": "i"}},
+				{"bookedition": bson.M{"$regex": query, "$options": "i"}},
+			},
+		}
+
+		cursor, err := coll.Find(context.TODO(), filter)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "Search error: "+err.Error())
+		}
+		var results []BookStore
+		if err = cursor.All(context.TODO(), &results); err != nil {
+			return c.String(http.StatusInternalServerError, "Cursor error: "+err.Error())
+		}
+
+		var books []map[string]interface{}
+		for _, res := range results {
+			books = append(books, map[string]interface{}{
+				"id":     res.ID,
+				"title":  res.BookName,
+				"author": res.BookAuthor,
+				"isbn":   res.BookISBN,
+				"pages":  res.BookPages,
+				"year":   res.BookYear,
+			})
+		}
+		return c.Render(http.StatusOK, "book-table", books)
+	})
+
+	e.POST("/api/books", func(c echo.Context) error {
+		var bookReq BookRequest
+
+		if err := c.Bind(&bookReq); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		}
+
+		if bookReq.Title == "" || bookReq.Author == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Title and author are required"})
+		}
+
+		if err := createBook(coll, bookReq); err != nil {
+			if err.Error() == "book already exists" {
+				return c.JSON(http.StatusConflict, map[string]string{"error": "Book already exists"})
+			}
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create book"})
+		}
+
+		return c.JSON(http.StatusCreated, map[string]string{"message": "Book created successfully"})
+	})
+
+	e.PUT("/api/books/:id", func(c echo.Context) error {
+		id := c.Param("id")
+
+		var bookReq BookRequest
+		if err := c.Bind(&bookReq); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		}
+
+		if bookReq.Title == "" || bookReq.Author == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Title and author are required"})
+		}
+
+		if err := updateBook(coll, id, bookReq); err != nil {
+			if err.Error() == "book not found" {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "Book not found"})
+			}
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to update book"})
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"message": "Book updated successfully"})
+	})
+
+	e.DELETE("/api/books/:id", func(c echo.Context) error {
+		id := c.Param("id")
+
+		if err := deleteBook(coll, id); err != nil {
+			if err.Error() == "book not found" {
+				return c.NoContent(http.StatusNoContent)
+			}
+			return c.JSON(http.StatusOK, map[string]string{"error": "Failed to delete book"})
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"message": "Book deleted successfully"})
 	})
 
 	e.Logger.Fatal(e.Start(":3030"))
