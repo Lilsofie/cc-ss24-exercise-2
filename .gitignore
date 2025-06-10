@@ -1,3 +1,4 @@
 data
 exercise-*.zip
 .DS_Store
+.env
